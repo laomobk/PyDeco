@@ -3,14 +3,14 @@ sys.path.append('..')
 
 import pydecoder as pd
 
-from tests.test_funcs import func_sbil
+from tests.test_funcs import func_me
 
 import utils
 
 def test():
-    fd = pd.FuncDecomplier(func_sbil)
+    fd = pd.FuncDecomplier(func_me)
 
-    c = func_sbil.__code__
+    c = func_me.__code__
     
     co = c.co_code
     co = utils.to_pairs(co)
@@ -26,4 +26,4 @@ import dis
 res = test()
 print('Total lines: ', len(res))
 pprint.pprint(res)
-dis.dis(func_sbil)
+dis.dis(func_me)

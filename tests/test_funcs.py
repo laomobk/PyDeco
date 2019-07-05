@@ -8,4 +8,10 @@ def func_sbil():
 
 def func_me():
     #该函数只有一行！！！！
-    list(iter(x))
+    a + b + c
+
+def func_reco():
+    a = b + c
+
+def func_ml():
+    return True

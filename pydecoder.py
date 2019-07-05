@@ -207,7 +207,11 @@ class FuncDecomplier:
         '''
         return self.__names[index]
 
-    def test_make_expr(self, c :tuple):
+    def test_split_bc_into_lines(self, c :list, tab :list):
+        #测试接口
+        return self.__split_bc_into_lines(c, tab)
+
+    def test_make_expr(self, c :list):
         #测试接口
         return self.__make_expr(c)
 

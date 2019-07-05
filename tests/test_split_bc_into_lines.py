@@ -15,7 +15,7 @@ def test():
     co = c.co_code
     co = utils.to_pairs(co)
 
-    res = fd.split_bc_into_lines(co, c.co_lnotab)
+    res = fd.test_split_bc_into_lines(co, c.co_lnotab)
 
     return res
     #return (res, utils.to_pairs(list(func_sbil.__code__.co_code)))

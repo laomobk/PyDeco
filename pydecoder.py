@@ -1,9 +1,6 @@
-from dis import opname, opmap
+from dis import opname, opmap, cmp_op
 import utils
 import error
-
-#识别码
-DEF_VAR = 1
 
 
 class Source:
@@ -14,9 +11,9 @@ class Source:
     def line(self):
         return self.line
     
-    def add_line(self, line):
-        print(line)
-        self.__lines.append(line)
+    def add_line(self, line, level = 0):
+        print(('\t'*level) + line)
+        self.__lines.append(('\t'*level) + line)
 
     def export(self, fp='Untitled.py'):
         '''
@@ -25,7 +22,7 @@ class Source:
         '''
         with open(fp, 'w') as f:
             for ln in self.__lines:
-                f.write(ln)
+                f.write(ln + '\n')
 
 #识别给出的字节码的类型
 class CodeRecognizer:
@@ -65,10 +62,12 @@ class CodeRecognizer:
         codes = utils.get_side(codes)
         beh = '{0} = {1}'
         
-        if opmap['STORE_NAME'] not in codes and opmap['SETUP_LOOP'] in codes: #后者为了排除for循环
-            return False
+        if opmap['STORE_NAME'] in codes or opmap['STORE_FAST'] in codes \
+                and opmap['SETUP_LOOP'] not in codes:
+            return True
+        
+        return False
 
-        return True
 
     def is_return_expr(self, codes :list):
         '''
@@ -106,8 +105,22 @@ class CodeRecognizer:
     def is_if_expr(self, codes :list):
         '''
         codes: 字节码对
+        !!!暂不支持单行 if 语句
         '''
-        pass
+        #fest = self.__find_jump_fastest(codes) #寻找最远的偏移量
+
+        '''
+        python 的 and or 表达式经过了很好的优化，但是，对于反编译来说，这是个噩梦！！！
+        我甚至用了2天的时间来找python对于and or语句的规律，例如整个表达式的结束。
+        但值得我欣慰的是，它只是一个表达式！！！！
+        '''
+
+        scodes = utils.get_side(codes)
+        if opname[scodes[-1]] in ('POP_JUMP_IF_FALSE', 'POP_JUMP_IF_TRUE'):
+            #如果最后是 POP_JUMP_IF_FALSE 或 POP_JUMP_IF_TRUE，就判断是 if 语句
+            return True
+
+        return False
 
 
     #TODO:识别更多类型
@@ -146,6 +159,11 @@ class FuncDecomplier:
         self.__reco = CodeRecognizer(self.__code)
         self.__source = Source()  #生成的源码文件
 
+        self.__level = 0  #代码缩进级别
+
+        self.__source.add_line(self.Head)
+        self.__level += 1
+
     @property
     def Head(self):
         return self.__HEAD
@@ -158,6 +176,9 @@ class FuncDecomplier:
         lcodes = self.__split_bc_into_lines(self.__codes, self.__code.co_lnotab)
         self.__make_like(locals)
 
+    def __add_line(self, line):
+        self.__source.add_line(line, self.__level)
+
     def __make_line(self, codes :list):
         '''
         codes : 所有已经分行的字节码对
@@ -165,7 +186,6 @@ class FuncDecomplier:
         '''
         ln_index = 0  #行号索引
         
-
         for ln in codes:  #codes: 整个已分行co_code, ln : 每行
             if self.__reco.is_return_expr(ln): #如果是 return expr
                 beh = 'return {0}'
@@ -180,18 +200,58 @@ class FuncDecomplier:
                     lln = ln[:-1]
 
                 expr = self.__make_expr(lln)  #生成return之后的表达式
-                self.__source.add_line(beh.format(expr))  #将结果添加到源码文件
+                self.__add_line(beh.format(expr))  #将结果添加到源码文件
             
             elif self.__reco.is_assert_expr(ln):
                 beh = 'assert {0}'
+                hsn = False #如果assert后面出现了not
                 #开始处理 LOAD_GLOBAL 以上的字节码对
-                sc = utils.get_side(codes)[::-1]  #取出一边，并颠倒
-                ci = sc.index(opmap['LOAD_GLOBAL'])
-                cs = sc[ci:][::-1] #截取 LOAD_GLOBAL 以上的字节码对，并回正
+                sc = utils.get_side(ln)[::-1]  #取出一边，并颠倒
+                try:
+                    ci = sc.index(opmap['POP_JUMP_IF_TRUE'])
+                    #如果assert后面出现not，则应该是POP_JUMP_IF_FALSE
+                except ValueError:
+                    hsn = True
+                    ci = ci = sc.index(opmap['POP_JUMP_IF_FALSE'])
 
-                cond = self.__make_cond_expr(cs)  #取得条件表达式
+                ci += 1  #不包括POP_JUMP_IF_XXXX 指令
 
-                self.__source.add_line(beh.format(cond))  #将结果添加至源码行中
+                cs = ln[::-1][ci:][::-1] #截取 POP_JUMP_IF_FALSE 以上的字节码对
+                cond = self.__make_expr(cs)  #取得表达式
+
+                self.__add_line(
+                    beh.format(
+                        ('not ' if hsn else '') + cond))  #将结果添加至源码行中,如果hsn，则将'not '加入
+                
+            elif self.__reco.is_def_var(ln):
+                isf = False  #如果是STORE_FAST
+                beh = '{0} = {1}'
+                #处理STORE_XXX以上的字节码
+                
+                rc = utils.get_side(ln)[::-1] #取出一边，并颠倒
+                
+                try:
+                    ci = rc.index(opmap['STORE_NAME'])  #找到STORE_NAME的位置
+                except ValueError:
+                    #当是STORE_FAST的时候
+                    isf = True
+                    ci = rc.index(opmap['STORE_FAST'])  #找到STORE_FAST的位置
+
+                exprcs = ln[::-1][ci+1:][::-1]  #截取STORE_XXX以上的字节码
+                expr = self.__make_expr(exprcs)  #生成表达式
+                argv = ln[::-1][ci][1]   #得到 STORE_XXX 的参数
+
+                if not isf:
+                    name = self.__load_name(argv)  #根据参数，得到变量名
+                else:
+                    name = self.__load_fast(argv)  #根据参数，得到变量名
+
+                self.__add_line(beh.format(name, expr))
+
+
+            else:  #单独表达式
+                expr = self.__make_expr(ln)
+                self.__add_line(expr)
 
             ln_index += 1
 
@@ -222,13 +282,13 @@ class FuncDecomplier:
         
         return tl
 
+    '''
     def __make_cond_expr(self, pairs :list):
-        '''
+        
         pairs:用于生成表达式的字节码对
         
         用于生成条件表达式
-        '''
-
+        
         cmp = lambda code, name : code == opmap[name]  #匿名函数，方便比较
         cp = 0  #字节码对指针
 
@@ -238,6 +298,7 @@ class FuncDecomplier:
 
 
             lnp += 1
+    '''
 
     #@error.mayerr
     def __make_expr(self, pairs :list):  # PASS 2019/7/5
@@ -344,6 +405,10 @@ class FuncDecomplier:
 
                 stack.append(beh)
 
+            elif cmp(code, 'COMPARE_OP'):
+                self.__make_arit_expr(cmp_op[arg], stack)
+
+
         #理论来说，一路下来，stack的长度应该是1
         if len(stack) != 1:
             raise error.DecomplierError('Expr-stack\'s length is not 1:\nExpr-Stack: '+str(stack))
@@ -351,6 +416,9 @@ class FuncDecomplier:
         return stack.pop()
 
     def __make_arit_expr(self, operation, stack):
+        '''
+        构建算数表达式并压入栈
+        '''
         a = stack.pop()
         b = stack.pop()
 
@@ -391,7 +459,8 @@ class FuncDecomplier:
 
     def test_make_line(self, c: list):
         #测试接口
-        return self.__make_line(c)
+        self.__make_line(c)
+        self.__source.export()
 
 def decode(codeobj):
     pass

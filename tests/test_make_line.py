@@ -18,4 +18,4 @@ def test():
 
     return fd.test_make_line(co)
 
-print(test())
+test()

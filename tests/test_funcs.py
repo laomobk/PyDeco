@@ -8,10 +8,14 @@ def func_sbil():
 
 def func_me():
     #该函数只有一行！！！！
-    a + b + c
+    a = a + b + c
+    c = c - d - e
 
 def func_reco():
-    a = b + c
+    return A + B + C + D
 
 def func_ml():
-    return True
+    a = 1
+    c = 1
+    
+    print(a + c)

@@ -37,6 +37,27 @@ class CodeRecognizer:
         self.__consts = codeobj.co_consts
         self.__varnames = codeobj.co_varnames
 
+    def __find_jump_fastest(self, codes :list):
+        '''
+        寻找在 POP_JUMP 中跳得最远的偏移量
+        codes : 需要用来判断的字节码对
+        '''
+        scodes = utils.get_side(codes)
+        cp = 0 #字节码对指针
+        fest = 0 #最远的偏移量
+
+        for c in scodes:
+            if opname[c] in ('POP_JUMP_IF_TRUE', 'POP_JUMP_IF_FALSE',
+                             'JUMP_IF_TRUE_OR_POP', 'JUMP_IF_FALSE_OR_POP'):
+                if codes[cp][1] > fest:  #如果现偏移量大于原偏移量
+                    fest = codes[cp][1]
+            cp += 1
+
+        if fest <= 0:
+            raise error.DecomplierError('The jump target can not be 0')
+        
+        return fest
+
     def is_def_var(self, codes :list):
         '''
         codes: 字节码对
@@ -81,6 +102,13 @@ class CodeRecognizer:
                 return True
             
             return False
+
+    def is_if_expr(self, codes :list):
+        '''
+        codes: 字节码对
+        '''
+        pass
+
 
     #TODO:识别更多类型
 

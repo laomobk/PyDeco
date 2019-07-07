@@ -276,9 +276,8 @@ class FuncDecomplier:
                 self.__add_line(beh.format(name, expr))
 
             elif self.__reco.is_import_expr(ln):
-                behn = 'import {0} {1} {2}'  #简单import
-                behf = 'from {0} import {1} {2} {3}' #from import
-                behas = '{0} as {1}'
+                behn = 'import {0}'  #简单import
+                behf = 'from {0} import {1}' #from import
 
                 has = False #是否拥有as
                 hsf = False #是否是from import
@@ -301,7 +300,7 @@ class FuncDecomplier:
                 scs = utils.get_side(cs)
 
                 #开始处理ci以上的字节码
-                if opmap['IMPORT_FROM']:
+                if opmap['IMPORT_FROM']:  #如果是 from xx import xx的样式
                     #最开头的IMPORT_FROM的前一个字节码是from的位置
                     fi = scs.index(opmap['IMPORT_FROM']) - 1 
                     imp_pos = self.__load_name(ln[fi][1]) #from的位置
@@ -312,7 +311,10 @@ class FuncDecomplier:
                     imp_ol = [op[1] for op in imp_nbrl if op[0] == 109]  #原成员名字
                     imp_nl = [op[1] for op in imp_nbrl if op[0] in [125, 90]]  #现成员名字
                     
-                    olnl = [(o, n) for o in imp_ol for n in imp_nl]
+                    ons = ['{0} as {1}'.format(o, n) for o in imp_ol for n in imp_nl]
+                    #生成的 xx as xx列表
+
+                    self.__source.add_line(behf.format(imp_pos, ', '.join(ons)))
                 else:
                     pass
                 

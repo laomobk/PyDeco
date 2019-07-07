@@ -304,6 +304,7 @@ class FuncDecomplier:
                     #最开头的IMPORT_FROM的前一个字节码是from的位置
                     fi = scs.index(opmap['IMPORT_FROM']) - 1 
                     imp_pos = self.__load_name(ln[fi][1]) #from的位置
+                    imp_fn = 
                     imp_nbr = self.__load_const(ln[fi-1][1]) #再往前就是import的内容，应该是一个元祖
                     imp_nbn = len(imp_nbr) * 2 #元祖的长度*2为下面 IMPORT_NAME IMPORT_FROM 的数量
                     #                    用于生成 __ as __
@@ -316,7 +317,11 @@ class FuncDecomplier:
 
                     self.__source.add_line(behf.format(imp_pos, ', '.join(ons)))
                 else:
-                    pass
+                    ci = scs.index(opmap['IMPORT_NAME'])  #获取最开头的IMPORT_NAME位置
+                    imp_ni = ln[ci][1] #获取import名称索引
+                    imp_n = self.__load_name(imp_ni)  #获取import名称
+
+
                 
             else:  #单独表达式
                 expr = self.__make_expr(ln)

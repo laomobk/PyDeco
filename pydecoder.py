@@ -2,6 +2,24 @@ from dis import opname, opmap, cmp_op
 import utils
 import error
 
+def sth_in(target, *sth):
+    '''
+    助手函数, 返回target里面是否有sth
+    如果sth是个元则target中只要有一个sth中的元素就返回True
+    '''
+    for obj in sth:
+        if obj in target:
+            return True
+    
+    return False
+
+def opall(*opnames):
+    cs = []  #用于返回的字节码
+    
+    for name in opnames:
+        cs.append(opmap[name])
+    
+    return cs
 
 class Source:
     def __init__(self):
@@ -63,7 +81,7 @@ class CodeRecognizer:
         beh = '{0} = {1}'
         
         if opmap['STORE_NAME'] in codes or opmap['STORE_FAST'] in codes \
-                and opmap['SETUP_LOOP'] not in codes:
+                and not (sth_in(codes, opall('IMPORT_STAR', 'IMPORT_NAME'))):
             return True
         
         return False
@@ -120,6 +138,16 @@ class CodeRecognizer:
             #如果最后是 POP_JUMP_IF_FALSE 或 POP_JUMP_IF_TRUE，就判断是 if 语句
             return True
 
+        return False
+
+    def is_import_expr(self, code :list):
+        '''
+        codes: 字节码对
+        '''
+        scodes = utils.get_side(code)
+
+        if sth_in(opall('IMPORT_NAME', 'IMPORT_STAR'), scodes):
+            return True
         return False
 
 
@@ -247,6 +275,17 @@ class FuncDecomplier:
                     name = self.__load_fast(argv)  #根据参数，得到变量名
 
                 self.__add_line(beh.format(name, expr))
+
+            elif self.__reco.is_import_expr(ln):
+                behn = 'import {0} {1} {2}'  #简单import
+                behf = 'from {0} import {1} {2} {3}' #from import
+
+                has = False #是否拥有as
+                '''
+                as 其实不用省略，因为 import os => import os as os
+                但是为了人性化，还是选择省略
+                '''
+
 
 
             else:  #单独表达式
@@ -460,7 +499,7 @@ class FuncDecomplier:
     def test_make_line(self, c: list):
         #测试接口
         self.__make_line(c)
-        self.__source.export()
+        self.__source.export('TEST_ML.py')
 
 def decode(codeobj):
     pass

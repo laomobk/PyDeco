@@ -78,7 +78,6 @@ class CodeRecognizer:
         codes: 字节码对
         '''
         codes = utils.get_side(codes)
-        beh = '{0} = {1}'
         
         if opmap['STORE_NAME'] in codes or opmap['STORE_FAST'] in codes \
                 and not (sth_in(codes, opall('IMPORT_STAR', 'IMPORT_NAME'))):
@@ -202,7 +201,7 @@ class FuncDecomplier:
 
     def __deco_init(self):
         lcodes = self.__split_bc_into_lines(self.__codes, self.__code.co_lnotab)
-        self.__make_like(locals)
+        self.__make_line(lcodes)
 
     def __add_line(self, line):
         self.__source.add_line(line, self.__level)
@@ -279,15 +278,44 @@ class FuncDecomplier:
             elif self.__reco.is_import_expr(ln):
                 behn = 'import {0} {1} {2}'  #简单import
                 behf = 'from {0} import {1} {2} {3}' #from import
+                behas = '{0} as {1}'
 
                 has = False #是否拥有as
+                hsf = False #是否是from import
+
+                isfast = False #如果是LOAD_FAST
+
                 '''
                 as 其实不用省略，因为 import os => import os as os
                 但是为了人性化，还是选择省略
                 '''
+                #处理 STORE_NAME 以上的字节码
+                
+                sln = utils.get_side(ln)[::-1]
+                try:
+                    ci = sln.index(opmap['STORE_FAST'])  #如果是在函数/方法里面import
+                except ValueError:
+                    ci = sln.index(opmap['STORE_NAME'])  #在global域import
 
+                cs = ln[::-1][ci+1:][::-1]  #截取ci以上的字节码，然后回正
+                scs = utils.get_side(cs)
 
-
+                #开始处理ci以上的字节码
+                if opmap['IMPORT_FROM']:
+                    #最开头的IMPORT_FROM的前一个字节码是from的位置
+                    fi = scs.index(opmap['IMPORT_FROM']) - 1 
+                    imp_pos = self.__load_name(ln[fi][1]) #from的位置
+                    imp_nbr = self.__load_const(ln[fi-1][1]) #再往前就是import的内容，应该是一个元祖
+                    imp_nbn = len(imp_nbr) * 2 #元祖的长度*2为下面 IMPORT_NAME IMPORT_FROM 的数量
+                    #                    用于生成 __ as __
+                    imp_nbrl = ln[fi+1:imp_nbn+1]  #得到import的成员和其别名(as xxx)
+                    imp_ol = [op[1] for op in imp_nbrl if op[0] == 109]  #原成员名字
+                    imp_nl = [op[1] for op in imp_nbrl if op[0] in [125, 90]]  #现成员名字
+                    
+                    olnl = [(o, n) for o in imp_ol for n in imp_nl]
+                else:
+                    pass
+                
             else:  #单独表达式
                 expr = self.__make_expr(ln)
                 self.__add_line(expr)
@@ -447,6 +475,8 @@ class FuncDecomplier:
             elif cmp(code, 'COMPARE_OP'):
                 self.__make_arit_expr(cmp_op[arg], stack)
 
+
+            cp += 1
 
         #理论来说，一路下来，stack的长度应该是1
         if len(stack) != 1:

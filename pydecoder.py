@@ -79,12 +79,21 @@ class CodeRecognizer:
         '''
         codes = utils.get_side(codes)
         
-        if opmap['STORE_NAME'] in codes or opmap['STORE_FAST'] in codes \
-                and (opmap['IMPORT_NAME'] not in codes):
+        if (opmap['STORE_NAME'] in codes or opmap['STORE_FAST'] in codes) \
+                and opmap['IMPORT_NAME'] not in codes and opmap["SETUP_LOOP"] not in codes:
             return True
         
         return False
 
+    def is_def_attr(self, codes : list):
+        '''
+        codes: 字节码对
+        '''
+        scodes = utils.get_side(codes)
+
+        if opmap in opmap['STORE_ATTR'] and opmap["SETUP_LOOP"] not in scodes:
+            return True
+        return False
 
     def is_return_expr(self, codes :list):
         '''
@@ -255,7 +264,7 @@ class FuncDecomplier:
                 beh = '{0} = {1}'
                 #处理STORE_XXX以上的字节码
                 
-                rc = utils.get_side(ln)[::-1] #取出一边，并颠倒
+                rc = utils.get_side(ln) #取出一边
                 
                 try:
                     ci = rc.index(opmap['STORE_NAME'])  #找到STORE_NAME的位置
@@ -264,9 +273,9 @@ class FuncDecomplier:
                     isf = True
                     ci = rc.index(opmap['STORE_FAST'])  #找到STORE_FAST的位置
 
-                exprcs = ln[::-1][ci+1:][::-1]  #截取STORE_XXX以上的字节码
+                exprcs = ln[:ci]  #截取STORE_XXX以上的字节码
                 expr = self.__make_expr(exprcs)  #生成表达式
-                argv = ln[::-1][ci][1]   #得到 STORE_XXX 的参数
+                argv = ln[ci][1] #得到 STORE_XXX 的参数
 
                 if not isf:
                     name = self.__load_name(argv)  #根据参数，得到变量名
@@ -274,6 +283,9 @@ class FuncDecomplier:
                     name = self.__load_fast(argv)  #根据参数，得到变量名
 
                 self.__add_line(beh.format(name, expr))
+
+            elif self.__reco.is_def_attr(ln):
+                pass
 
             elif self.__reco.is_import_expr(ln):
                 behn = 'import {0}'  #简单import
@@ -508,8 +520,48 @@ class FuncDecomplier:
                     tl.append(str(item))
 
                 stack.append('[{0}]'.format(', '.join(tl)))
+                
+            elif cmp(code, 'LOAD_METHOD') or cmp(code, 'LOAD_ATTR'):
+                #LOAD_METHOD, LOAD_ATTR的区别是给python虚拟机看的,本质上区别很小
+                beh = '{0}.{1}'
+                ins = stack.pop()  #对象名称
+                attrn = self.__load_name(arg)
 
-            cp += 1
+                stack.append(beh.format(ins, attrn))
+
+            elif cmp(code, 'CALL_METHOD'):
+                beh = '{0}({1})'
+                #arg 的值是 参数的数量
+                args = ', '.join([str(stack.pop()) for x in range(arg)][::-1])  #逐个出栈，并翻转
+                cler = stack.pop()  #方法调用者
+                stack.append(beh.format(cler, args))
+
+            elif cmp(code, 'BUILD_TUPLE'):  #代码和 BUILD_LIST 一模一样
+                items = [stack.pop() for _ in range(arg)][::-1]  #根据参数，得到元素数量，依次弹出栈，并反转
+                #生成数组表达式，不能使用str()，否则数组嵌套时会出现内部数组是字符串的情况！！
+                tl = []
+                for item in items:
+                    if isinstance(item, str) and \
+                        (item[0], item[-1]) in (('[', ']'), ('(', ')'), ('{', '}')):
+                        #为了判断对方是否是字符串
+                        tl.append(item)
+                        continue
+                    tl.append(str(item))
+
+            elif cmp(code, 'BUILD_CONST_KEY_MAP') or cmp(code, 'BUILD_MAP'):  
+                #BUILD_CONST_KEY_MAP 和 BUILD_MAP 差不多的
+                keys = stack.pop()  #此时TOS就是键，当map长度为1时，TOS是个const
+                
+                if not isinstance(keys, tuple): #当TOS不是tuple时
+                    keys = (keys, )
+
+                vs = [str(stack.pop()) for x in range(arg)][::-1]  #获取值列表，并反转
+                kvs = utils.merge(keys, vs)  #将keys,vs合并
+                kvstr = ', '.join(['{0}:{1}'.format(k, v) for k, v in kvs])  #生成键值对
+
+                stack.append('{'+('{0}'.format(kvstr)+'}'))
+
+            cp += 1  #将字节码指针加1
 
         #理论来说，一路下来，stack的长度应该是1
         if len(stack) != 1:

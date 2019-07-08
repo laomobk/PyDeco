@@ -80,7 +80,7 @@ class CodeRecognizer:
         codes = utils.get_side(codes)
         
         if opmap['STORE_NAME'] in codes or opmap['STORE_FAST'] in codes \
-                and not (sth_in(codes, opall('IMPORT_STAR', 'IMPORT_NAME'))):
+                and (opmap['IMPORT_NAME'] not in codes):
             return True
         
         return False
@@ -145,7 +145,7 @@ class CodeRecognizer:
         '''
         scodes = utils.get_side(code)
 
-        if sth_in(opall('IMPORT_NAME', 'IMPORT_STAR'), scodes):
+        if opmap['IMPORT_NAME'] in scodes:
             return True
         return False
 
@@ -300,28 +300,40 @@ class FuncDecomplier:
                 scs = utils.get_side(cs)
 
                 #开始处理ci以上的字节码
-                if opmap['IMPORT_FROM']:  #如果是 from xx import xx的样式
-                    #最开头的IMPORT_FROM的前一个字节码是from的位置
-                    fi = scs.index(opmap['IMPORT_FROM']) - 1 
-                    imp_pos = self.__load_name(ln[fi][1]) #from的位置
-                    imp_fn = 
-                    imp_nbr = self.__load_const(ln[fi-1][1]) #再往前就是import的内容，应该是一个元祖
-                    imp_nbn = len(imp_nbr) * 2 #元祖的长度*2为下面 IMPORT_NAME IMPORT_FROM 的数量
-                    #                    用于生成 __ as __
-                    imp_nbrl = ln[fi+1:imp_nbn+1]  #得到import的成员和其别名(as xxx)
-                    imp_ol = [op[1] for op in imp_nbrl if op[0] == 109]  #原成员名字
-                    imp_nl = [op[1] for op in imp_nbrl if op[0] in [125, 90]]  #现成员名字
-                    
-                    ons = ['{0} as {1}'.format(o, n) for o in imp_ol for n in imp_nl]
-                    #生成的 xx as xx列表
+                if opmap['IMPORT_STAR'] in scs:  #如果是from xx import *
+                    #尽管 from xx import * 不允许出现在函数中
+                    imp_ni = scs.index(opmap['IMPORT_NAME'])
+                    imp_name = self.__load_name(ln[imp_ni][1])
 
-                    self.__source.add_line(behf.format(imp_pos, ', '.join(ons)))
+                    self.__add_line(behf.format(imp_name, '*'))
+                elif opmap['IMPORT_FROM'] in scs:  #如果是 from xx import xx的样式
+                    #最开头的IMPORT_FROM是from的位置
+                    fi = scs.index(opmap['IMPORT_NAME']) 
+                    imp_pos = self.__load_name(ln[fi][1]) #from的位置
+                    imp_nbr = self.__load_const(ln[fi-1][1]) #再往前就是import的内容，应该是一个元祖
+                    imp_nbn = len(imp_nbr) * 2 #元祖的长度*2为下面 IMPORT_NAME STORE_NAME 的数量,用于生成 __ as __
+                    imp_nbrl = ln[fi+1:fi+imp_nbn+1]  #得到import的成员和其别名(as xxx)
+                    imp_ol = [self.__load_name(op[1]) for op in imp_nbrl if op[0] == 109]  #原成员名字
+                    imp_nl = [self.__load_fast(op[1]) for op in imp_nbrl if op[0] in [125, 90]]  #现成员名字
+
+                    if len(imp_ol) != len(imp_nl):
+                        raise error.DecomplierError('len(imp_ol) != len(imp_nl)!\nimp_ol:'+str(imp_ol)
+                                                +'\nimp_nl:'+str(imp_nl))
+                    
+                    onp = utils.merge(imp_ol, imp_nl)
+                    ons = ['{0}{1}'.format(o, (f' as {n}' if o != n else '')) for o, n in onp]
+                    #生成的 xx as xx列表 如果o, n同名，则取o
+
+                    self.__add_line(behf.format(imp_pos, ', '.join(ons)))
                 else:
                     ci = scs.index(opmap['IMPORT_NAME'])  #获取最开头的IMPORT_NAME位置
-                    imp_ni = ln[ci][1] #获取import名称索引
-                    imp_n = self.__load_name(imp_ni)  #获取import名称
-
-
+                    imp_n = self.__load_name(ln[ci][1])  #获取import名称
+                    imp_as = self.__load_name(ln[ci+1][1])  #import对象的as名称
+                    
+                    if imp_n != imp_as:  #如果导入对象原名称不等于现名称
+                        self.__add_line(behn.format(imp_n + ' as ' + imp_as))  #将as加在后面
+                        return
+                    self.__add_line(behn.format(imp_n))   #不加as
                 
             else:  #单独表达式
                 expr = self.__make_expr(ln)
@@ -459,8 +471,9 @@ class FuncDecomplier:
 
                 args = [str(stack.pop()) for i in range(arg)][::-1]
                 print(args)
-                beh = 'slice({0})'.format(':'.join(args)) #切片的本质是实例化一个 slice 对象
-                
+                beh = '{0}'.format(':'.join([(a if a != 'None' else '') for a in args])) #切片的本质是实例化一个 slice 对象
+                #如果a为'None'，就不显示
+
                 stack.append(beh)
 
             elif cmp(code, 'BINARY_SUBSCR'):
@@ -482,6 +495,19 @@ class FuncDecomplier:
             elif cmp(code, 'COMPARE_OP'):
                 self.__make_arit_expr(cmp_op[arg], stack)
 
+            elif cmp(code, 'BUILD_LIST'):
+                items = [stack.pop() for _ in range(arg)][::-1]  #根据参数，得到元素数量，依次弹出栈，并反转
+                #生成数组表达式，不能使用str()，否则数组嵌套时会出现内部数组是字符串的情况！！
+                tl = []
+                for item in items:
+                    if isinstance(item, str) and \
+                        (item[0], item[-1]) in (('[', ']'), ('(', ')'), ('{', '}')):
+                        #为了判断对方是否是字符串
+                        tl.append(item)
+                        continue
+                    tl.append(str(item))
+
+                stack.append('[{0}]'.format(', '.join(tl)))
 
             cp += 1
 
@@ -503,6 +529,9 @@ class FuncDecomplier:
         stack.append(beh)
 
     def __load_const(self, index):
+        '''
+        co_consts[index]
+        '''
         c = self.__consts[index]
         if isinstance(c, str):
             return '"' + c + '"'
@@ -511,13 +540,13 @@ class FuncDecomplier:
 
     def __load_fast(self, index):
         '''
-        用于 LOAD_FAST
+        用于 LOAD_FAST  co_varnames[index]
         '''
         return self.__varnames[index]
 
     def __load_name(self, index):
         '''
-        用于 LOAD_NAME & LOAD_GLOBAL
+        用于 LOAD_NAME & LOAD_GLOBAL  #co_names[index]
         '''
         return self.__names[index]
 

@@ -15,7 +15,4 @@ def func_reco():
     return A + B + C + D
 
 def func_ml():
-    a = 1
-    c = 1
-    
-    print(a + c)
+    a = [[1, 5, 8, 2, 1],'[1,2,3]',[3, 4, 5]][2 : 1][::-1][1]

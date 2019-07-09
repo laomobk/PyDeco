@@ -14,4 +14,4 @@ def func_reco():
     return A + B + C + D
 
 def func_ml():
-        a = 1
+        a[1] = c.d[1]

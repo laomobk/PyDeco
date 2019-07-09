@@ -91,7 +91,7 @@ class CodeRecognizer:
         '''
         scodes = utils.get_side(codes)
 
-        if opmap in opmap['STORE_ATTR'] and opmap["SETUP_LOOP"] not in scodes:
+        if opmap['STORE_ATTR'] in scodes and opmap["SETUP_LOOP"] not in scodes:
             return True
         return False
 
@@ -158,6 +158,15 @@ class CodeRecognizer:
             return True
         return False
 
+    def is_store_subscr_expr(self, code :list):
+        '''
+        codes: 字节码对
+        '''
+        scodes = utils.get_side(code)
+
+        if opmap['STORE_SUBSCR'] in scodes:
+            return True
+        return False
 
     #TODO:识别更多类型
 
@@ -285,7 +294,33 @@ class FuncDecomplier:
                 self.__add_line(beh.format(name, expr))
 
             elif self.__reco.is_def_attr(ln):
-                pass
+                #处理LOAD_NAME/LOAD_FAST,STORE_ATTR之间的字节码
+                beh = '{0}.{1} = {2}'
+                scs = utils.get_side(ln)[::-1]  #取一边，并颠倒
+                si = scs.index(opmap['STORE_ATTR'])
+                loni = lofi = logi = 0xffffffff  #先设置得很大，然后再比较那个小
+                #因为是取最小值，而且也不能保证LOAD三家族都存在
+
+                try:
+                    loni = scs.index(opmap['LOAD_NAME'])  #寻找最近的LOAD_NAME
+                except:pass
+                try:
+                    lofi = scs.index(opmap['LOAD_FAST'])  #寻找最近的LOAD_FAST
+                except:pass
+                try:
+                    logi = scs.index(opmap['LOAD_GLOBAL'])  #寻找最近的LOAD_FAST
+                except:pass
+
+                #比较loni 和 lofi的大小，取最小，因为当LOAD_NAME/LOAD_FAST没有时，不代表没有LOAD_FAST/LOAD_NAME
+                loi = min(logi, lofi, loni)
+                pexprc = ln[::-1][si+1:loi+1][::-1]  #截取LOAD_NAME/LOAD_FAST以下STORE_ATTR以上的字节码，并回正
+                pexpr = self.__make_expr(pexprc)
+                #接着，再将loi以上的字节码截取，作为属性值
+                vexprc = ln[::-1][loi+1:][::-1]  #截取loi以上的字节码
+                vexpr = self.__make_expr(vexprc)
+                pname = self.__load_name(ln[::-1][si][1]) #获取属性名称
+
+                self.__add_line(beh.format(pexpr, pname, vexpr))
 
             elif self.__reco.is_import_expr(ln):
                 behn = 'import {0}'  #简单import
@@ -346,6 +381,20 @@ class FuncDecomplier:
                         self.__add_line(behn.format(imp_n + ' as ' + imp_as))  #将as加在后面
                         return
                     self.__add_line(behn.format(imp_n))   #不加as
+
+            elif self.__reco.is_store_subscr_expr(ln):
+                beh = '{0}[{1}] = {2}'
+                scs = utils.get_side(ln)
+                si = scs.index(opmap['STORE_SUBSCR'])  #得到STORE_SUBSCR的位置
+                vli = []  #用于生成索引的表达式
+                
+                sv = {
+                    opmap['LOAD_NAME'] : lambda i:self.__load_name(i),
+                    opmap['LOAD_GLOBAL'] : lambda i:self.__load_name(i),
+                    opmap['LOAD_FAST'] : lambda i:self.__load_fast(i),
+                }.get(scs[si-1], lambda i:error.DecomplierError(
+                    'Un know opcode:{0}'.format(opname[scs[si-1]])))(ln[si][1]) #根据字节码类型，得到对应解决方案
+                
                 
             else:  #单独表达式
                 expr = self.__make_expr(ln)
@@ -411,7 +460,8 @@ class FuncDecomplier:
         cmp = lambda code, name : code == opmap[name]  #匿名函数，方便比较
         
         for code, arg in pairs:
-            #print(opname[code], '\t', arg)  #DEBUG :输出字节码
+            #
+            # (opname[code], '\t', arg)  #DEBUG :输出字节码
             if cmp(code, 'LOAD_CONST'):
                 stack.append(self.__load_const(arg))
             
@@ -482,7 +532,6 @@ class FuncDecomplier:
                     return  #当arg是0时，是单纯索引
 
                 args = [str(stack.pop()) for i in range(arg)][::-1]
-                print(args)
                 beh = '{0}'.format(':'.join([(a if a != 'None' else '') for a in args])) #切片的本质是实例化一个 slice 对象
                 #如果a为'None'，就不显示
 
@@ -566,7 +615,6 @@ class FuncDecomplier:
         #理论来说，一路下来，stack的长度应该是1
         if len(stack) != 1:
             raise error.DecomplierError('Expr-stack\'s length is not 1:\nExpr-Stack: '+str(stack))
-
         return stack.pop()
 
     def __make_arit_expr(self, operation, stack):

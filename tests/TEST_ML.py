@@ -1,2 +1,2 @@
 def func_ml():
-	a = 1
+	a.b.c = c.d[1]
